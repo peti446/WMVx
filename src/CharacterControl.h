@@ -1,6 +1,8 @@
 #pragma once
 
 #include <QWidget>
+#include <QJsonObject>
+#include <QJsonArray>
 #include "ui_CharacterControl.h"
 #include "core/modeling/GenericModelAdaptors.h"
 #include "core/modeling/Model.h"
@@ -9,6 +11,9 @@
 #include "core/database/GameDatasetAdaptors.h"
 #include "core/modeling/CharacterCustomization.h"
 #include "core/modeling/AttachmentCustomization.h"
+
+// Forward declaration
+class WowArmoryImportDialog;
 
 
 class CharacterControl : public QWidget, public WidgetUsesScene, public WidgetUsesGameClient
@@ -32,6 +37,7 @@ private:
 
 	void toggleActive();
 	void openChoiceDialog(core::CharacterSlot slot);
+	void openArmoryImportDialog();
 	void updateEquipmentLabel(core::CharacterSlot slot);
 	void randomiseComboBox(QComboBox* comboBox);
 	void openEnchantDialog(core::CharacterSlot slot);
@@ -40,6 +46,10 @@ private:
 	void updateModel();
 	void updateEquipment();
 	void updateItem(core::CharacterSlot slot, const core::CharacterItemWrapper& wrapper);
+
+	void processArmoryImport(const QJsonObject& characterData, const WowArmoryImportDialog::ImportSettings& settings);
+	void processCustomizations(const QJsonArray& customizations);
+	void processEquipment(const QJsonArray& items);
 
 	core::GameFileUri searchSlotTexture(core::GameFileUri file, core::CharacterRegion region);
 

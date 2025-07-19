@@ -54,11 +54,22 @@
          </property>
          <layout class="QVBoxLayout" name="verticalLayout_3">
           <item>
-           <widget class="QPushButton" name="pushButtonRandomise">
-            <property name="text">
-             <string>Randomise</string>
-            </property>
-           </widget>
+           <layout class="QHBoxLayout" name="horizontalLayout">
+            <item>
+             <widget class="QPushButton" name="pushButtonRandomise">
+              <property name="text">
+               <string>Randomise</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="pushButtonImportArmory">
+              <property name="text">
+               <string>Import from Armory</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
           </item>
           <item>
            <layout class="QFormLayout" name="formLayoutCustomizations"/>

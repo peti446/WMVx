@@ -3,10 +3,13 @@
 #include "EquipmentChoiceDialog.h"
 #include "CustomTabardDialog.h"
 #include "EffectChoiceDialog.h"
+#include "WowArmoryImportDialog.h"
 #include "core/utility/Logger.h"
 #include <ranges>
 #include <functional>
 #include <algorithm>
+#include <QJsonArray>
+#include <QMessageBox>
 
 using namespace core;
 
@@ -99,6 +102,10 @@ CharacterControl::CharacterControl(QWidget* parent)
 			applyCustomizations();
 			updateModel();
 		}
+	});
+
+	connect(ui.pushButtonImportArmory, &QPushButton::pressed, [&]() {
+		openArmoryImportDialog();
 	});
 
 	connect(ui.comboBoxEyeGlow, &QComboBox::currentIndexChanged, [&](int index) {
@@ -1047,4 +1054,211 @@ std::vector<core::CharacterSlot> CharacterControl::getSlotOrder(const core::Mode
 
 	assert(order.size() == (size_t)core::CharacterSlot::MAX);
 	return order;
+}
+
+void CharacterControl::openArmoryImportDialog()
+{
+	if (model == nullptr) {
+		QMessageBox::information(this, "No Character Model", "Please load a character model first before importing from armory.");
+		return;
+	}
+
+	WowArmoryImportDialog* dialog = new WowArmoryImportDialog(this);
+	connect(dialog, &WowArmoryImportDialog::importCompleted, this, &CharacterControl::processArmoryImport);
+	dialog->show();
+}
+
+void CharacterControl::processArmoryImport(const QJsonObject& characterData, const WowArmoryImportDialog::ImportSettings& settings)
+{
+	if (!characterData.contains("character") || !characterData.contains("items")) {
+		QMessageBox::warning(this, "Import Error", "Invalid character data received.");
+		return;
+	}
+
+	core::Log::message("Processing WoW Armory import for character: " + 
+					  characterData["character"].toObject()["name"].toString());
+
+	try {
+		// Clear existing models if requested
+		if (settings.clearExistingModels && scene != nullptr) {
+			scene->clearComponents();
+		}
+
+		// Clear existing equipment if importing equipment
+		if (settings.importEquipment) {
+			model->characterEquipment.clear();
+		}
+
+		// Process character customizations
+		if (settings.importCustomizations && characterData.contains("customizations")) {
+			processCustomizations(characterData["customizations"].toArray());
+		}
+
+		// Process equipment
+		if (settings.importEquipment && characterData.contains("items")) {
+			processEquipment(characterData["items"].toArray());
+		}
+
+		// Update the character model
+		updateModel();
+
+		// Update UI labels
+		for (const auto& slot : controlMap) {
+			updateEquipmentLabel(slot.first);
+		}
+
+		core::Log::message("Successfully imported character from WoW Armory");
+
+	} catch (const std::exception& e) {
+		QMessageBox::critical(this, "Import Error", 
+			QString("Failed to import character data: %1").arg(e.what()));
+		core::Log::message("WoW Armory import failed: " + QString(e.what()));
+	}
+}
+
+void CharacterControl::processCustomizations(const QJsonArray& customizations)
+{
+	// Map API customization names to our internal system
+	// This is a simplified implementation - in a full version you'd need comprehensive mapping
+	
+	for (const auto& customValue : customizations) {
+		QJsonObject custom = customValue.toObject();
+		
+		if (!custom.contains("option") || !custom.contains("choice")) {
+			continue;
+		}
+
+		QJsonObject option = custom["option"].toObject();
+		QJsonObject choice = custom["choice"].toObject();
+
+		QString optionName = option["name"].toString();
+		uint32_t choiceId = choice["id"].toUInt();
+		uint32_t displayOrder = choice["display_order"].toUInt();
+
+		// Log the customization for debugging
+		core::Log::message(QString("Found customization: %1 = %2 (choice %3)")
+						  .arg(optionName)
+						  .arg(displayOrder)
+						  .arg(choiceId));
+
+		// Try to map common customization types
+		QComboBox* combo = nullptr;
+		
+		// Map some common customization names (this is simplified)
+		if (optionName.contains("Skin", Qt::CaseInsensitive) || 
+			optionName.contains("Peau", Qt::CaseInsensitive)) {
+			combo = getCustomizationControl("Skin Color");
+		}
+		else if (optionName.contains("Face", Qt::CaseInsensitive) || 
+				 optionName.contains("Visage", Qt::CaseInsensitive)) {
+			combo = getCustomizationControl("Face");
+		}
+		else if (optionName.contains("Hair", Qt::CaseInsensitive) || 
+				 optionName.contains("Coiffure", Qt::CaseInsensitive)) {
+			if (optionName.contains("Color", Qt::CaseInsensitive) || 
+				optionName.contains("Couleur", Qt::CaseInsensitive)) {
+				combo = getCustomizationControl("Hair Color");
+			} else {
+				combo = getCustomizationControl("Hair Style");
+			}
+		}
+
+		// Apply the customization if we found a matching control
+		if (combo != nullptr && displayOrder < combo->count()) {
+			combo->setCurrentIndex(displayOrder);
+		}
+	}
+
+	// Apply all customizations
+	applyCustomizations();
+}
+
+void CharacterControl::processEquipment(const QJsonArray& items)
+{
+	// Map API slot types to our character slots
+	static const std::map<QString, core::CharacterSlot> slotMapping = {
+		{"HEAD", core::CharacterSlot::HEAD},
+		{"SHOULDER", core::CharacterSlot::SHOULDER},
+		{"SHIRT", core::CharacterSlot::SHIRT},
+		{"CHEST", core::CharacterSlot::CHEST},
+		{"WAIST", core::CharacterSlot::BELT},
+		{"LEGS", core::CharacterSlot::PANTS},
+		{"FEET", core::CharacterSlot::BOOTS},
+		{"WRIST", core::CharacterSlot::BRACERS},
+		{"HANDS", core::CharacterSlot::GLOVES},
+		{"BACK", core::CharacterSlot::CAPE},
+		{"MAIN_HAND", core::CharacterSlot::HAND_RIGHT},
+		{"OFF_HAND", core::CharacterSlot::HAND_LEFT},
+		{"TABARD", core::CharacterSlot::TABARD}
+	};
+
+	for (const auto& itemValue : items) {
+		QJsonObject item = itemValue.toObject();
+		
+		if (!item.contains("slot") || !item.contains("id")) {
+			continue;
+		}
+
+		QJsonObject slot = item["slot"].toObject();
+		QString slotType = slot["type"].toString();
+		uint32_t itemId = item["id"].toUInt();
+
+		core::Log::message(QString("Found equipment: %1 in slot %2")
+						  .arg(itemId)
+						  .arg(slotType));
+
+		// Map to our character slot
+		auto slotIt = slotMapping.find(slotType);
+		if (slotIt == slotMapping.end()) {
+			continue;
+		}
+
+		core::CharacterSlot characterSlot = slotIt->second;
+
+		try {
+			// Look up the item in our database
+			const auto* itemRecord = gameDB->itemDB->findById(itemId);
+			if (itemRecord == nullptr) {
+				core::Log::message(QString("Item %1 not found in database").arg(itemId));
+				continue;
+			}
+
+			// Get the display IDs for this item
+			auto displayIds = itemRecord->getItemDisplayInfoId();
+			if (displayIds.empty()) {
+				core::Log::message(QString("No display info for item %1").arg(itemId));
+				continue;
+			}
+
+			// Use the first display ID (could be enhanced to handle item appearance modifier)
+			uint32_t displayId = displayIds[0];
+			
+			// Handle item appearance modifier if present
+			if (item.contains("item_appearance_modifier_id")) {
+				uint32_t modifierId = item["item_appearance_modifier_id"].toUInt();
+				if (modifierId > 0 && modifierId < displayIds.size()) {
+					displayId = displayIds[modifierId];
+				}
+			}
+
+			// Create character item wrapper
+			auto wrapper = core::CharacterItemWrapper::make(itemRecord, gameDB, displayId);
+			
+			// Add to character equipment
+			model->characterEquipment[characterSlot] = wrapper;
+
+			core::Log::message(QString("Successfully equipped item %1 (display %2) in slot %3")
+							  .arg(itemId)
+							  .arg(displayId)
+							  .arg(slotType));
+
+		} catch (const std::exception& e) {
+			core::Log::message(QString("Failed to equip item %1: %2")
+							  .arg(itemId)
+							  .arg(e.what()));
+		}
+	}
+
+	// Update equipment display
+	updateEquipment();
 }
